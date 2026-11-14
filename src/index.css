@@ -1,0 +1,130 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --bg-app: #F8FAFC;
+    --bg-surface: #FFFFFF;
+    --bg-subtle: #F1F5F9;
+
+    --color-primary: #10B981;
+    --color-primary-hover: #059669;
+    --color-primary-pressed: #047857;
+    --color-primary-tint: #ECFDF5;
+    --color-primary-border: #A7F3D0;
+
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --text-muted: #94A3B8;
+
+    --border-default: #E2E8F0;
+    --divider-default: #F1F5F9;
+
+    --status-success: #10B981;
+    --status-success-tint: #ECFDF5;
+    --status-warning: #F59E0B;
+    --status-warning-tint: #FFFBEB;
+    --status-error: #EF4444;
+    --status-error-tint: #FEF2F2;
+    --status-info: #3B82F6;
+    --status-info-tint: #EFF6FF;
+
+    --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.05);
+    --shadow-card-hover: 0 4px 12px rgba(15, 23, 42, 0.06), 0 10px 24px rgba(15, 23, 42, 0.07);
+    --shadow-overlay: 0 12px 32px rgba(15, 23, 42, 0.12);
+
+    --font-display: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif;
+    --font-sans: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .dark {
+    --bg-app: #0F172A;
+    --bg-surface: #1E293B;
+    --bg-subtle: #0F172A;
+    --text-primary: #F8FAFC;
+    --text-secondary: #CBD5E1;
+    --text-muted: #94A3B8;
+    --border-default: #334155;
+    --divider-default: #1E293B;
+    --shadow-card: 0 1px 2px rgba(2, 6, 23, 0.35), 0 4px 16px rgba(2, 6, 23, 0.25);
+    --shadow-card-hover: 0 6px 18px rgba(2, 6, 23, 0.45);
+    --shadow-overlay: 0 16px 36px rgba(2, 6, 23, 0.55);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    background-color: var(--bg-app);
+    color: var(--text-primary);
+    scroll-behavior: smooth;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid #10B981;
+    outline-offset: 2px;
+  }
+}
+
+.sn-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.sn-card-clickable {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.sn-card-clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.headline-balance {
+  text-wrap: balance;
+}
+
+@keyframes fadeInGentle {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeInGentle 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

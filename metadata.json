@@ -1,0 +1,6 @@
+{
+  "name": "SkillNova AI",
+  "description": "Know your skills. Build your future. AI-powered personalized skill-gap analysis, prerequisite-aware learning roadmaps, adaptive assessments, and contextual mentoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
