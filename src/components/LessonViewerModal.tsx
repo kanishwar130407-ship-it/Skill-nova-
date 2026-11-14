@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BookOpen, Check, CheckSquare, Clock, Code2, ExternalLink, X } from 'lucide-react';
 import { LearningResource } from '../types/domain';
 
@@ -16,6 +16,10 @@ export const LessonViewerModal: React.FC<LessonViewerModalProps> = ({
   onMarkComplete,
 }) => {
   const [checkedSteps, setCheckedSteps] = useState<number[]>([]);
+
+  useEffect(() => {
+    setCheckedSteps([]);
+  }, [resource?.id]);
 
   if (!resource) return null;
 

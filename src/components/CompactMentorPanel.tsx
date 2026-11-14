@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bot, Send, X } from 'lucide-react';
+import { Bot, RefreshCw, Send, X } from 'lucide-react';
 import { SafeMarkdown } from './SafeMarkdown';
 import { MentorMessage, ProposedRoadmapChange } from '../types/domain';
 
@@ -7,8 +7,10 @@ interface CompactMentorPanelProps {
   open: boolean;
   messages: MentorMessage[];
   isSending: boolean;
+  error?: string | null;
   onClose: () => void;
   onSendMessage: (question: string) => Promise<void>;
+  onRetryLast?: () => Promise<void>;
   onConfirmProposedChange: (proposal: ProposedRoadmapChange) => Promise<void>;
 }
 
@@ -16,8 +18,10 @@ export const CompactMentorPanel: React.FC<CompactMentorPanelProps> = ({
   open,
   messages,
   isSending,
+  error,
   onClose,
   onSendMessage,
+  onRetryLast,
   onConfirmProposedChange,
 }) => {
   const [input, setInput] = useState('');
@@ -107,6 +111,24 @@ export const CompactMentorPanel: React.FC<CompactMentorPanelProps> = ({
             <p className="text-xs text-[#475569] dark:text-slate-400">
               Thinking with your learner context...
             </p>
+          )}
+          {error && (
+            <div
+              role="alert"
+              className="rounded-xl border border-[#FECACA] dark:border-rose-900 bg-[#FEF2F2] dark:bg-rose-950/40 p-3 flex items-center justify-between gap-3"
+            >
+              <p className="text-xs text-[#DC2626] dark:text-rose-200">{error}</p>
+              {onRetryLast && (
+                <button
+                  type="button"
+                  onClick={onRetryLast}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#EF4444] text-white text-[11px] font-medium hover:bg-[#DC2626] shrink-0"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Retry
+                </button>
+              )}
+            </div>
           )}
         </div>
 

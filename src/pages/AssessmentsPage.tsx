@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -10,15 +10,19 @@ import {
   XCircle,
 } from 'lucide-react';
 import { ASSESSMENT_CATALOG_CLIENT } from '../data/seedCatalog';
+import { fetchJsonWithRetry } from '../lib/apiClient';
 import { Assessment, AssessmentAttempt } from '../types/domain';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 
 interface AssessmentsPageProps {
   preselectedAssessmentId?: string | null;
+  highlightedAttemptId?: string | null;
   attempts: AssessmentAttempt[];
   unlockThreshold: number;
   remediationThreshold: number;
   isSubmitting: boolean;
+  onClearPreselection?: () => void;
+  onClearHighlightedAttempt?: () => void;
   onSubmitAssessment: (params: {
     assessmentId: string;
     answers: Record<string, string | number>;
@@ -28,10 +32,13 @@ interface AssessmentsPageProps {
 
 export const AssessmentsPage: React.FC<AssessmentsPageProps> = ({
   preselectedAssessmentId,
+  highlightedAttemptId,
   attempts,
   unlockThreshold,
   remediationThreshold,
   isSubmitting,
+  onClearPreselection,
+  onClearHighlightedAttempt,
   onSubmitAssessment,
 }) => {
   const [catalog, setCatalog] = useState<Assessment[]>(ASSESSMENT_CATALOG_CLIENT);
@@ -40,10 +47,10 @@ export const AssessmentsPage: React.FC<AssessmentsPageProps> = ({
   const [answers, setAnswers] = useState<Record<string, string | number>>({});
   const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
   const [latestResult, setLatestResult] = useState<AssessmentAttempt | null>(null);
+  const handledPreselectionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/assessments')
-      .then((r) => (r.ok ? r.json() : null))
+    fetchJsonWithRetry<{ assessments?: Assessment[] }>('/api/assessments', { retries: 1 })
       .then((d) => {
         if (d?.assessments) setCatalog(d.assessments);
       })
@@ -53,22 +60,47 @@ export const AssessmentsPage: React.FC<AssessmentsPageProps> = ({
   }, []);
 
   useEffect(() => {
-    if (preselectedAssessmentId) {
-      const found = catalog.find((a) => a.id === preselectedAssessmentId);
-      if (found) {
-        setActiveAssessment(found);
-        setCurrentQuestionIndex(0);
-        setAnswers({});
-        setLatestResult(null);
-      }
+    if (!preselectedAssessmentId) {
+      handledPreselectionRef.current = null;
+      return;
+    }
+    if (handledPreselectionRef.current === preselectedAssessmentId) return;
+    const found = catalog.find((a) => a.id === preselectedAssessmentId);
+    if (found) {
+      handledPreselectionRef.current = preselectedAssessmentId;
+      setActiveAssessment(found);
+      setCurrentQuestionIndex(0);
+      setAnswers({});
+      setLatestResult(null);
     }
   }, [preselectedAssessmentId, catalog]);
+
+  useEffect(() => {
+    if (!highlightedAttemptId) return;
+    const matchedAttempt = attempts.find((att) => att.id === highlightedAttemptId);
+    if (matchedAttempt) {
+      const matchedAssessment =
+        catalog.find((a) => a.id === matchedAttempt.assessmentId) ?? catalog[0];
+      if (matchedAssessment) {
+        setActiveAssessment(matchedAssessment);
+        setLatestResult(matchedAttempt);
+      }
+      onClearHighlightedAttempt?.();
+    }
+  }, [highlightedAttemptId, attempts, catalog, onClearHighlightedAttempt]);
 
   const startAssessment = (a: Assessment) => {
     setActiveAssessment(a);
     setCurrentQuestionIndex(0);
     setAnswers({});
     setLatestResult(null);
+  };
+
+  const inspectAttempt = (att: AssessmentAttempt) => {
+    const matchedAssessment = catalog.find((a) => a.id === att.assessmentId) ?? catalog[0];
+    if (!matchedAssessment) return;
+    setActiveAssessment(matchedAssessment);
+    setLatestResult(att);
   };
 
   const handleConfirmSubmit = async () => {
@@ -157,6 +189,7 @@ export const AssessmentsPage: React.FC<AssessmentsPageProps> = ({
               onClick={() => {
                 setActiveAssessment(null);
                 setLatestResult(null);
+                onClearPreselection?.();
               }}
               className="text-xs font-medium text-[#475569] hover:text-[#0F172A] dark:hover:text-slate-200 px-3 py-1.5 rounded-xl border border-[#E2E8F0] hover:bg-[#F1F5F9] transition-colors"
             >
@@ -490,11 +523,20 @@ export const AssessmentsPage: React.FC<AssessmentsPageProps> = ({
                     {att.isSimulatedDemo ? ' · Simulated Low-Score Demo (kept separate from genuine results)' : ' · Genuine Learner Attempt'}
                   </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-base font-bold text-[#0F172A] dark:text-slate-100 tabular-nums">
-                    {att.scorePercent}%
-                  </p>
-                  <p className="text-xs text-[#475569] dark:text-slate-400">{att.outcomeBand}</p>
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => inspectAttempt(att)}
+                    className="text-xs font-medium text-[#059669] dark:text-emerald-400 hover:underline whitespace-nowrap"
+                  >
+                    Inspect Breakdown
+                  </button>
+                  <div className="text-right">
+                    <p className="text-base font-bold text-[#0F172A] dark:text-slate-100 tabular-nums">
+                      {att.scorePercent}%
+                    </p>
+                    <p className="text-xs text-[#475569] dark:text-slate-400">{att.outcomeBand}</p>
+                  </div>
                 </div>
               </div>
             ))}

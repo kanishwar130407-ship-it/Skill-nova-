@@ -309,3 +309,199 @@ test('11. JSON export payload captures progress, assessments, and roadmap data c
   const filename = buildExportFilename('Alex Morgan', new Date('2026-11-13T12:00:00.000Z'));
   assert.equal(filename, 'skillnova-record-alex-morgan-2026-11-13.json');
 });
+
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { createApp } from '../server/app';
+
+test('12. HTTP API integration & 10-step E2E learner journey (onboarding -> assessment -> mentor -> career switch -> custom goal)', async () => {
+  const app = createApp();
+  const server = http.createServer(app);
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+
+  const { port } = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    // 1) Health endpoint
+    const healthRes = await fetch(`${baseUrl}/api/health`);
+    assert.equal(healthRes.status, 200);
+    const healthJson = await healthRes.json();
+    assert.equal(healthJson.ok, true);
+    assert.equal(healthJson.storageMode, 'local-browser-demo');
+    assert.equal(typeof healthJson.geminiConfigured, 'boolean');
+
+    // 2) Unknown API route returns JSON 404, not HTML
+    const notFoundRes = await fetch(`${baseUrl}/api/nonexistent-route`);
+    assert.equal(notFoundRes.status, 404);
+    const notFoundJson = await notFoundRes.json();
+    assert.match(notFoundJson.error, /not found/i);
+
+    // 3) Malformed JSON body returns clean 400
+    const badJsonRes = await fetch(`${baseUrl}/api/mentor/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{bad-json',
+    });
+    assert.equal(badJsonRes.status, 400);
+    const badJson = await badJsonRes.json();
+    assert.match(badJson.error, /malformed json/i);
+
+    // 4) Invalid Zod payload returns 400
+    const invalidPayloadRes = await fetch(`${baseUrl}/api/orchestrate/onboarding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventId: 'x', profile: {}, evidence: [], roleTemplates: [] }),
+    });
+    assert.equal(invalidPayloadRes.status, 400);
+
+    // 5) GET /api/assessments omits answer keys
+    const catalogRes = await fetch(`${baseUrl}/api/assessments`);
+    assert.equal(catalogRes.status, 200);
+    const catalogJson = await catalogRes.json();
+    assert.ok(Array.isArray(catalogJson.assessments) && catalogJson.assessments.length > 0);
+    for (const a of catalogJson.assessments) {
+      for (const q of a.questions) {
+        assert.equal('correctOptionIndex' in q, false);
+        assert.equal('correctOptionText' in q, false);
+      }
+    }
+
+    // 6) Onboarding orchestration builds roadmap & 5 agent runs
+    const onboardRes = await fetch(`${baseUrl}/api/orchestrate/onboarding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        eventId: 'e2e-onboard-1',
+        trigger: 'onboarding',
+        profile: DEMO_PROFILE_SEED,
+        evidence: DEMO_SKILL_EVIDENCE_SEED,
+        roleTemplates: CAREER_ROLES,
+        existingRoadmap: null,
+      }),
+    });
+    assert.equal(onboardRes.status, 200);
+    const onboardJson = await onboardRes.json();
+    assert.ok(onboardJson.roadmap);
+    assert.equal(onboardJson.roadmap.targetRoleId, DEMO_PROFILE_SEED.targetRoleId);
+    assert.equal(onboardJson.agentRuns.length, 5);
+    assert.ok(onboardJson.mentorMessage?.content);
+
+    // 7) Passing assessment submission updates evidence & unlocks next module
+    const passRes = await fetch(`${baseUrl}/api/assessments/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        submissionEventId: 'e2e-assess-pass-1',
+        assessmentId: 'assess-html-css-bridge',
+        answers: {
+          'q-hc-1': SERVER_ANSWER_KEYS['q-hc-1'].correctOptionIndex!,
+          'q-hc-2': SERVER_ANSWER_KEYS['q-hc-2'].correctOptionIndex!,
+          'q-hc-3': SERVER_ANSWER_KEYS['q-hc-3'].correctOptionIndex!,
+        },
+        isSimulatedDemo: false,
+        profile: DEMO_PROFILE_SEED,
+        evidence: DEMO_SKILL_EVIDENCE_SEED,
+        roadmap: onboardJson.roadmap,
+        roleTemplates: CAREER_ROLES,
+        unlockThreshold: 80,
+        remediationThreshold: 60,
+      }),
+    });
+    assert.equal(passRes.status, 200);
+    const passJson = await passRes.json();
+    assert.equal(passJson.attempt.scorePercent, 100);
+    assert.equal(passJson.attempt.outcomeBand, 'mastery-ready');
+    const unlockedJs = passJson.updatedRoadmap.modules.find((m: any) => m.id === 'mod-js-foundations');
+    assert.equal(unlockedJs.status, 'available');
+
+    // Mark SQL module completed so we can verify preservation during career switch
+    const roadmapWithCompletedSql = {
+      ...passJson.updatedRoadmap,
+      modules: passJson.updatedRoadmap.modules.map((m: any) =>
+        m.id === 'mod-sql-integration' ? { ...m, status: 'completed' } : m,
+      ),
+    };
+
+    // 8) AI Mentor chat responds and proposes career pivot when asked about Data Analyst
+    const mentorRes = await fetch(`${baseUrl}/api/mentor/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: 'Should I switch to Data Analyst and how will my progress carry over?',
+        profile: DEMO_PROFILE_SEED,
+        evidence: passJson.updatedEvidence,
+        roadmap: roadmapWithCompletedSql,
+        roleTemplates: CAREER_ROLES,
+        recentAttempts: [passJson.attempt],
+        recentRuns: onboardJson.agentRuns,
+      }),
+    });
+    assert.equal(mentorRes.status, 200);
+    const mentorJson = await mentorRes.json();
+    assert.ok(mentorJson.message?.content);
+    assert.equal(mentorJson.message?.proposedChange?.targetRoleId, 'data-analyst');
+
+    // 9) Career change orchestration switches to Data Analyst, preserves overlapping SQL module, increments version
+    const switchRes = await fetch(`${baseUrl}/api/orchestrate/career-change`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        eventId: 'e2e-career-switch-1',
+        profile: DEMO_PROFILE_SEED,
+        targetRoleId: 'data-analyst',
+        evidence: passJson.updatedEvidence,
+        currentRoadmap: roadmapWithCompletedSql,
+        roleTemplates: CAREER_ROLES,
+      }),
+    });
+    assert.equal(switchRes.status, 200);
+    const switchJson = await switchRes.json();
+    assert.equal(switchJson.updatedProfile.targetRoleId, 'data-analyst');
+    assert.equal(switchJson.newRoadmap.targetRoleId, 'data-analyst');
+    assert.equal(switchJson.newRoadmap.version, roadmapWithCompletedSql.version + 1);
+    assert.equal(switchJson.newRoadmap.versions.length, 3);
+    const preservedSql = switchJson.newRoadmap.modules.find((m: any) => m.targetSkillId === 'sql');
+    assert.equal(preservedSql?.status, 'completed');
+
+    // Verify idempotent eventId replay returns the exact cached workflow result
+    const switchReplayRes = await fetch(`${baseUrl}/api/orchestrate/career-change`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        eventId: 'e2e-career-switch-1',
+        profile: DEMO_PROFILE_SEED,
+        targetRoleId: 'data-analyst',
+        evidence: passJson.updatedEvidence,
+        currentRoadmap: roadmapWithCompletedSql,
+        roleTemplates: CAREER_ROLES,
+      }),
+    });
+    assert.equal(switchReplayRes.status, 200);
+    const switchReplayJson = await switchReplayRes.json();
+    assert.equal(switchReplayJson.newRoadmap.id, switchJson.newRoadmap.id);
+
+    // 10) Custom career requirements generation returns valid role requirements
+    const customReqRes = await fetch(`${baseUrl}/api/careers/generate-requirements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roleId: 'quantum-ml-architect',
+        roleTitle: 'Quantum ML Architect',
+        category: 'AI & Data',
+      }),
+    });
+    assert.equal(customReqRes.status, 200);
+    const customReqJson = await customReqRes.json();
+    assert.ok(Array.isArray(customReqJson.data?.requirements) && customReqJson.data.requirements.length >= 8);
+    assert.ok(typeof customReqJson.data?.shortDescription === 'string' && customReqJson.data.shortDescription.length > 0);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+});
+

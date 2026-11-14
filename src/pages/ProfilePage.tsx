@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Award, Bell, Compass, FolderGit2, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { SKILLS_TAXONOMY } from '../data/seedCatalog';
 import { levelLabel } from '../lib/scoring';
@@ -61,6 +61,15 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const [certIssuer, setCertIssuer] = useState('');
 
   const [needsAnalysisRefresh, setNeedsAnalysisRefresh] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setName(profile.name);
+    setRoleOrEducation(profile.roleOrEducation);
+    setBackground(profile.background);
+    setWeeklyHours(profile.weeklyHours);
+    setFormError(null);
+  }, [profile.id, profile.updatedAt]);
 
   const activeRole = roleTemplates.find((r) => r.id === profile.targetRoleId) ?? roleTemplates[0];
   const secondaryRoles = (profile.secondaryRoleIds ?? [])
@@ -69,10 +78,19 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
 
   const handleSaveBasic = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (name.trim().length < 2) {
+      setFormError('Please enter your full name (at least 2 characters).');
+      return;
+    }
+    if (roleOrEducation.trim().length < 2) {
+      setFormError('Please specify your current role or education.');
+      return;
+    }
+    setFormError(null);
     const updated: LearnerProfile = {
       ...profile,
-      name: name.trim() || profile.name,
-      roleOrEducation: roleOrEducation.trim() || profile.roleOrEducation,
+      name: name.trim(),
+      roleOrEducation: roleOrEducation.trim(),
       background: background.trim(),
       weeklyHours: Math.max(1, Math.min(60, weeklyHours)),
       updatedAt: new Date().toISOString(),
@@ -296,6 +314,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
             className={fieldClass}
           />
         </div>
+        {formError && (
+          <p role="alert" className="text-xs font-medium text-[#DC2626] dark:text-rose-400">
+            {formError}
+          </p>
+        )}
         <div className="flex justify-end">
           <button
             type="submit"

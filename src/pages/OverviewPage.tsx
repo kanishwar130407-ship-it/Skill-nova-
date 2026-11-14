@@ -489,7 +489,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
 
       {/* Charts Row: Learning Activity BarChart + Assessment Score LineChart */}
       <div className="grid lg:grid-cols-2 gap-6">
-        <section className="sn-card p-6 space-y-4">
+        <section className="sn-card p-6 space-y-4 min-w-0">
           <div>
             <h2 className="text-lg font-semibold text-[#0F172A] dark:text-slate-100">
               Learning Activity
@@ -513,8 +513,8 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
               </button>
             </div>
           ) : (
-            <div className="h-56 w-full" aria-label="Learning activity bar chart">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-56 w-full min-w-0" aria-label="Learning activity bar chart">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
                 <BarChart data={activityChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
                   <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#475569' }} />
@@ -529,7 +529,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
           )}
         </section>
 
-        <section className="sn-card p-6 space-y-4">
+        <section className="sn-card p-6 space-y-4 min-w-0">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-[#0F172A] dark:text-slate-100">
@@ -562,8 +562,8 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
               </button>
             </div>
           ) : (
-            <div className="h-56 w-full" aria-label="Assessment score trend line chart">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-56 w-full min-w-0" aria-label="Assessment score trend line chart">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
                 <LineChart data={assessmentTrendData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
                   <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#475569' }} />

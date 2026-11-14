@@ -63,6 +63,7 @@ import {
 } from 'lucide-react';
 import { CAREER_CATEGORIES, slugifyRoleTitle } from '../data/careers';
 import { SKILLS_TAXONOMY } from '../data/seedCatalog';
+import { fetchJsonWithRetry } from '../lib/apiClient';
 import { computeRoleGapSummary, levelLabel } from '../lib/scoring';
 import {
   CareerCategory,
@@ -173,6 +174,7 @@ export const CareerGoalLibrary: React.FC<CareerGoalLibraryProps> = ({
   const [sortMode, setSortMode] = useState<SortMode>('recommended');
   const [drawerRoleId, setDrawerRoleId] = useState<string | null>(null);
   const [loadingRoleId, setLoadingRoleId] = useState<string | null>(null);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
   const [editingTemplate, setEditingTemplate] = useState(false);
 
   const [compareIds, setCompareIds] = useState<string[]>([]);
@@ -239,8 +241,9 @@ export const CareerGoalLibrary: React.FC<CareerGoalLibraryProps> = ({
       return role;
     }
     setLoadingRoleId(role.id);
+    setDrawerError(null);
     try {
-      const res = await fetch('/api/careers/generate-requirements', {
+      const payload = await fetchJsonWithRetry<{ data: any }>('/api/careers/generate-requirements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -249,8 +252,6 @@ export const CareerGoalLibrary: React.FC<CareerGoalLibraryProps> = ({
           category: role.category,
         }),
       });
-      if (!res.ok) throw new Error('Failed to generate role requirements');
-      const payload = await res.json();
       const enriched: CareerRole = {
         ...role,
         overview: payload.data.shortDescription || role.overview,
@@ -262,7 +263,12 @@ export const CareerGoalLibrary: React.FC<CareerGoalLibraryProps> = ({
       };
       onCacheRoleDetails(enriched);
       return enriched;
-    } catch {
+    } catch (err) {
+      setDrawerError(
+        err instanceof Error
+          ? `${err.message} Showing saved role overview.`
+          : 'Could not load detailed role requirements.',
+      );
       return role;
     } finally {
       setLoadingRoleId(null);
@@ -271,6 +277,7 @@ export const CareerGoalLibrary: React.FC<CareerGoalLibraryProps> = ({
 
   const handleOpenRoleDrawer = async (role: CareerRole) => {
     setDrawerRoleId(role.id);
+    setDrawerError(null);
     setEditingTemplate(false);
     await ensureRoleRequirementsLoaded(role);
   };
@@ -296,7 +303,7 @@ export const CareerGoalLibrary: React.FC<CareerGoalLibraryProps> = ({
     setCustomLoading(true);
     try {
       const roleId = slugifyRoleTitle(title);
-      const res = await fetch('/api/careers/generate-requirements', {
+      const payload = await fetchJsonWithRetry<{ data: any }>('/api/careers/generate-requirements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -305,8 +312,6 @@ export const CareerGoalLibrary: React.FC<CareerGoalLibraryProps> = ({
           category: 'Technology',
         }),
       });
-      if (!res.ok) throw new Error('Could not generate custom role requirements.');
-      const payload = await res.json();
       const customRole: CareerRole = {
         id: roleId,
         title,
@@ -724,6 +729,22 @@ export const CareerGoalLibrary: React.FC<CareerGoalLibraryProps> = ({
             <p className="text-sm text-[#475569] dark:text-slate-300 leading-relaxed">
               {drawerRole.overview}
             </p>
+
+            {drawerError && (
+              <div
+                role="alert"
+                className="rounded-xl border border-[#FECACA] dark:border-rose-900 bg-[#FEF2F2] dark:bg-rose-950/40 px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs text-[#DC2626] dark:text-rose-200"
+              >
+                <span>{drawerError}</span>
+                <button
+                  type="button"
+                  onClick={() => ensureRoleRequirementsLoaded(drawerRole)}
+                  className="font-semibold underline shrink-0"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
 
             {loadingRoleId === drawerRole.id ? (
               <div className="space-y-3" aria-busy="true" aria-label="Generating role skill requirements">

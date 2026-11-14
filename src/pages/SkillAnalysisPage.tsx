@@ -52,6 +52,7 @@ export const SkillAnalysisPage: React.FC<SkillAnalysisPageProps> = ({
     const reqNum = Math.max(1, proficiencyToNumeric(g.requiredLevel));
     const pct = Math.min(100, Math.round((curNum / reqNum) * 100));
     return {
+      skillId: g.skillId,
       name: g.skillName,
       coverage: pct,
       fill:
@@ -198,15 +199,15 @@ export const SkillAnalysisPage: React.FC<SkillAnalysisPageProps> = ({
 
       {/* Radar Chart + Coverage Bar Chart */}
       <div className="grid lg:grid-cols-2 gap-6">
-        <section className="sn-card p-6">
+        <section className="sn-card p-6 min-w-0">
           <h2 className="text-lg font-semibold text-[#0F172A] dark:text-slate-100">
             Target vs Current Skill Dimensions
           </h2>
           <p className="text-xs text-[#475569] dark:text-slate-400 mb-4">
             Scale: 0 = Unassessed, 1 = Beginner, 2 = Intermediate, 3 = Advanced
           </p>
-          <div className="h-72 w-full" aria-label="Radar chart comparing current skill levels against role targets">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-72 w-full min-w-0" aria-label="Radar chart comparing current skill levels against role targets">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={260}>
               <RadarChart data={radarData}>
                 <PolarGrid stroke="#E2E8F0" />
                 <PolarAngleAxis dataKey="skill" tick={{ fontSize: 11, fill: '#475569' }} />
@@ -232,7 +233,7 @@ export const SkillAnalysisPage: React.FC<SkillAnalysisPageProps> = ({
           </div>
         </section>
 
-        <section className="sn-card p-6 space-y-4">
+        <section className="sn-card p-6 space-y-4 min-w-0">
           <div>
             <h2 className="text-lg font-semibold text-[#0F172A] dark:text-slate-100">
               Proficiency Coverage by Skill
@@ -241,8 +242,8 @@ export const SkillAnalysisPage: React.FC<SkillAnalysisPageProps> = ({
               Green = target met, Amber = partial coverage, Red = critical gap
             </p>
           </div>
-          <div className="h-72 w-full" aria-label="Bar chart of skill proficiency coverage">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-72 w-full min-w-0" aria-label="Bar chart of skill proficiency coverage">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={260}>
               <BarChart data={barData} layout="vertical" margin={{ left: 10, right: 16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" horizontal={false} />
                 <XAxis type="number" domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#475569' }} unit="%" />
@@ -250,7 +251,7 @@ export const SkillAnalysisPage: React.FC<SkillAnalysisPageProps> = ({
                 <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
                 <Bar dataKey="coverage" name="Target Coverage %" radius={[0, 6, 6, 0]} barSize={16}>
                   {barData.map((entry) => (
-                    <Cell key={entry.name} fill={entry.fill} />
+                    <Cell key={entry.skillId} fill={entry.fill} />
                   ))}
                 </Bar>
               </BarChart>

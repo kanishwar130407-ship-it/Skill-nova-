@@ -1,12 +1,12 @@
-import {
+import type {
   AssessmentAttempt,
   CareerRole,
   LearningModule,
   LearningRoadmap,
   RoadmapVersion,
   SkillEvidence,
-} from '../types/domain';
-import { CURATED_RESOURCES } from '../data/seedCatalog';
+} from '../types/domain.ts';
+import { CURATED_RESOURCES } from '../data/seedCatalog.ts';
 
 interface ModuleTemplate {
   id: string;

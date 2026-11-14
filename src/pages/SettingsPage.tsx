@@ -102,12 +102,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               min={30}
               max={75}
               value={preferences.remediationThreshold}
-              onChange={(e) =>
+              onChange={(e) => {
+                const raw = Math.min(75, Math.max(30, Number(e.target.value) || 60));
+                const clamped = Math.min(raw, preferences.unlockThreshold - 5);
                 onUpdatePreferences({
                   ...preferences,
-                  remediationThreshold: Math.min(75, Math.max(30, Number(e.target.value) || 60)),
-                })
-              }
+                  remediationThreshold: clamped,
+                });
+              }}
               className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-950 px-3.5 py-2 text-sm tabular-nums text-[#0F172A] dark:text-slate-100 focus:bg-white"
             />
           </div>
@@ -121,12 +123,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               min={70}
               max={95}
               value={preferences.unlockThreshold}
-              onChange={(e) =>
+              onChange={(e) => {
+                const unlock = Math.min(95, Math.max(70, Number(e.target.value) || 80));
                 onUpdatePreferences({
                   ...preferences,
-                  unlockThreshold: Math.min(95, Math.max(70, Number(e.target.value) || 80)),
-                })
-              }
+                  unlockThreshold: unlock,
+                  remediationThreshold: Math.min(preferences.remediationThreshold, unlock - 5),
+                });
+              }}
               className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-950 px-3.5 py-2 text-sm tabular-nums text-[#0F172A] dark:text-slate-100 focus:bg-white"
             />
           </div>

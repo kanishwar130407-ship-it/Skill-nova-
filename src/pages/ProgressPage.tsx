@@ -122,7 +122,7 @@ export const ProgressPage: React.FC<ProgressPageProps> = ({
 
       {/* Charts */}
       <div className="grid lg:grid-cols-2 gap-6">
-        <section className="sn-card p-6 space-y-3">
+        <section className="sn-card p-6 space-y-3 min-w-0">
           <h2 className="text-lg font-semibold text-[#0F172A] dark:text-slate-100">
             Study Activity Breakdown
           </h2>
@@ -131,8 +131,8 @@ export const ProgressPage: React.FC<ProgressPageProps> = ({
               No study sessions recorded yet.
             </p>
           ) : (
-            <div className="h-64 w-full" aria-label="Bar chart of weekly study activity">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-64 w-full min-w-0" aria-label="Bar chart of weekly study activity">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                 <BarChart data={activityData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
                   <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#475569' }} />
@@ -147,7 +147,7 @@ export const ProgressPage: React.FC<ProgressPageProps> = ({
           )}
         </section>
 
-        <section className="sn-card p-6 space-y-3">
+        <section className="sn-card p-6 space-y-3 min-w-0">
           <h2 className="text-lg font-semibold text-[#0F172A] dark:text-slate-100">
             Assessment Score Trends
           </h2>
@@ -156,8 +156,8 @@ export const ProgressPage: React.FC<ProgressPageProps> = ({
               No genuine assessments completed yet. Take an assessment to plot your score trend.
             </p>
           ) : (
-            <div className="h-64 w-full" aria-label="Line chart of assessment score trends">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-64 w-full min-w-0" aria-label="Line chart of assessment score trends">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                 <LineChart data={trendData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
                   <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#475569' }} />

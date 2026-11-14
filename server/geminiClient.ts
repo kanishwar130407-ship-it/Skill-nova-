@@ -2,8 +2,10 @@ import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { z } from 'zod';
 
 export const GEMINI_MODEL = 'gemini-4-hydrogen';
+const DEFAULT_CALL_TIMEOUT_MS = 7500;
 
 let cachedClient: GoogleGenAI | null = null;
+let cachedApiKey: string | null = null;
 
 export function isGeminiConfigured(): boolean {
   const key = process.env.GEMINI_API_KEY;
@@ -12,13 +14,16 @@ export function isGeminiConfigured(): boolean {
 
 export function getGeminiClient(): GoogleGenAI | null {
   if (!isGeminiConfigured()) return null;
-  if (!cachedClient) {
+  const apiKey = process.env.GEMINI_API_KEY!.trim();
+  if (!cachedClient || cachedApiKey !== apiKey) {
+    cachedApiKey = apiKey;
     cachedClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
         },
+        timeout: DEFAULT_CALL_TIMEOUT_MS,
       },
     });
   }
@@ -34,6 +39,26 @@ export function wrapUntrustedData(label: string, text: string): string {
   return `<untrusted_data label="${label}">\n${cleaned}\n</untrusted_data>`;
 }
 
+function stripJsonCodeFences(raw: string): string {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return match ? match[1].trim() : trimmed;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function callGeminiStructured<T>(params: {
   systemInstruction: string;
   userPrompt: string;
@@ -45,29 +70,35 @@ export async function callGeminiStructured<T>(params: {
   };
   zodSchema: z.ZodType<T>;
   maxRetries?: number;
+  timeoutMs?: number;
 }): Promise<{ data: T; mode: 'live-gemini' }> {
   const client = getGeminiClient();
   if (!client) {
     throw new Error('GEMINI_NOT_CONFIGURED');
   }
 
-  const maxRetries = params.maxRetries ?? 2;
+  const maxRetries = params.maxRetries ?? 1;
+  const timeoutMs = params.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await client.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: params.userPrompt,
-        config: {
-          systemInstruction: params.systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: params.responseSchema as Record<string, unknown>,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        },
-      });
+      const response = await withTimeout(
+        client.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: params.userPrompt,
+          config: {
+            systemInstruction: params.systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema: params.responseSchema as Record<string, unknown>,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
+        }),
+        timeoutMs,
+        'Gemini structured call',
+      );
 
-      const rawText = (response.text ?? '').trim();
+      const rawText = stripJsonCodeFences(response.text ?? '');
       if (!rawText) {
         throw new Error('Empty JSON response from Gemini');
       }
@@ -77,7 +108,7 @@ export async function callGeminiStructured<T>(params: {
     } catch (err) {
       lastError = err;
       if (attempt < maxRetries) {
-        const delayMs = 400 * Math.pow(2, attempt);
+        const delayMs = 300 * Math.pow(2, attempt);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
@@ -90,25 +121,31 @@ export async function callGeminiText(params: {
   systemInstruction: string;
   userPrompt: string;
   maxRetries?: number;
+  timeoutMs?: number;
 }): Promise<{ text: string; mode: 'live-gemini' }> {
   const client = getGeminiClient();
   if (!client) {
     throw new Error('GEMINI_NOT_CONFIGURED');
   }
 
-  const maxRetries = params.maxRetries ?? 2;
+  const maxRetries = params.maxRetries ?? 1;
+  const timeoutMs = params.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await client.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: params.userPrompt,
-        config: {
-          systemInstruction: params.systemInstruction,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        },
-      });
+      const response = await withTimeout(
+        client.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: params.userPrompt,
+          config: {
+            systemInstruction: params.systemInstruction,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
+        }),
+        timeoutMs,
+        'Gemini text call',
+      );
 
       const text = (response.text ?? '').trim();
       if (!text) {
@@ -118,7 +155,7 @@ export async function callGeminiText(params: {
     } catch (err) {
       lastError = err;
       if (attempt < maxRetries) {
-        const delayMs = 400 * Math.pow(2, attempt);
+        const delayMs = 300 * Math.pow(2, attempt);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }

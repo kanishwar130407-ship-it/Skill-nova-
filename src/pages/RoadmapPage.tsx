@@ -23,6 +23,7 @@ import {
 
 interface RoadmapPageProps {
   roadmap: LearningRoadmap | null;
+  unlockThreshold?: number;
   onStartModule: (moduleId: string) => void;
   onOpenResource: (resource: LearningResource) => void;
   onToggleExerciseStep: (moduleId: string, stepIndex: number) => void;
@@ -71,6 +72,7 @@ const STATUS_TABS: Array<{ id: string; label: string }> = [
 
 export const RoadmapPage: React.FC<RoadmapPageProps> = ({
   roadmap,
+  unlockThreshold = 80,
   onStartModule,
   onOpenResource,
   onToggleExerciseStep,
@@ -95,8 +97,8 @@ export const RoadmapPage: React.FC<RoadmapPageProps> = ({
     );
   }
 
-  const toggleExpand = (id: string) => {
-    setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleExpand = (id: string, currentExpanded: boolean) => {
+    setExpandedIds((prev) => ({ ...prev, [id]: !currentExpanded }));
   };
 
   const uniqueSkills = Array.from(new Set(roadmap.modules.map((m) => m.targetSkillId)));
@@ -232,7 +234,8 @@ export const RoadmapPage: React.FC<RoadmapPageProps> = ({
           <p className="p-8 text-sm text-[#475569] text-center">No modules match the selected filters.</p>
         ) : (
           filteredModules.map((mod: LearningModule) => {
-            const isExpanded = Boolean(expandedIds[mod.id] || mod.status === 'needs_review' || mod.status === 'in_progress');
+            const defaultExpanded = mod.status === 'needs_review' || mod.status === 'in_progress';
+            const isExpanded = expandedIds[mod.id] ?? defaultExpanded;
             const isLocked = mod.status === 'locked';
             const skillName = SKILLS_TAXONOMY.find((s) => s.id === mod.targetSkillId)?.name ?? mod.targetSkillId;
             const prereqTitles = mod.prerequisites
@@ -335,7 +338,7 @@ export const RoadmapPage: React.FC<RoadmapPageProps> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => toggleExpand(mod.id)}
+                        onClick={() => toggleExpand(mod.id, isExpanded)}
                         aria-expanded={isExpanded}
                         className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-[#E2E8F0] dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-[#0F172A] dark:text-slate-200 hover:bg-[#F1F5F9] dark:hover:bg-slate-800 transition-colors"
                       >
@@ -380,7 +383,7 @@ export const RoadmapPage: React.FC<RoadmapPageProps> = ({
                         </button>
                         {isLocked && (
                           <span className="text-xs text-[#94A3B8] dark:text-slate-400">
-                            Complete prerequisite module(s) with 80%+ assessment score to unlock.
+                            Complete prerequisite module(s) with {unlockThreshold}%+ assessment score to unlock.
                           </span>
                         )}
                       </div>

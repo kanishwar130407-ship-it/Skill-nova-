@@ -1,4 +1,4 @@
-import {
+import type {
   CareerRole,
   GapPriority,
   NumericProficiency,
@@ -7,7 +7,7 @@ import {
   Skill,
   SkillEvidence,
   SkillGap,
-} from '../types/domain';
+} from '../types/domain.ts';
 
 export function proficiencyToNumeric(level: ProficiencyLevel): NumericProficiency {
   switch (level) {

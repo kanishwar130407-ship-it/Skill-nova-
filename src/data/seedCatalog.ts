@@ -1,4 +1,4 @@
-import {
+import type {
   Assessment,
   CareerRole,
   LearnerProfile,
@@ -6,7 +6,7 @@ import {
   LearningSession,
   Skill,
   SkillEvidence,
-} from '../types/domain';
+} from '../types/domain.ts';
 
 export const SKILLS_TAXONOMY: Skill[] = [
   { id: 'html', name: 'HTML5 & Semantic Markup', category: 'frontend', description: 'Document structure, forms, landmarks, and accessible semantic markup.' },
@@ -25,7 +25,7 @@ export const SKILLS_TAXONOMY: Skill[] = [
   { id: 'ml-fundamentals', name: 'Machine Learning Fundamentals', category: 'ml', description: 'Train/test splits, regression, classification, overfitting, and evaluation metrics.' },
 ];
 
-import { CAREER_LIBRARY } from './careers';
+import { CAREER_LIBRARY } from './careers.ts';
 
 export const CAREER_ROLES: CareerRole[] = CAREER_LIBRARY;
 

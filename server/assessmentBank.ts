@@ -1,4 +1,4 @@
-import { ASSESSMENT_CATALOG_CLIENT } from '../src/data/seedCatalog';
+import { ASSESSMENT_CATALOG_CLIENT } from '../src/data/seedCatalog.ts';
 
 export interface ServerAnswerKey {
   questionId: string;

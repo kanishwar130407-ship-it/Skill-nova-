@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -22,6 +22,7 @@ import {
   Sun,
   Target,
   User,
+  UserPlus,
   X,
 } from 'lucide-react';
 import { CompactMentorPanel } from './components/CompactMentorPanel';
@@ -30,6 +31,7 @@ import { LessonViewerModal } from './components/LessonViewerModal';
 import { NotificationCenter } from './components/NotificationCenter';
 import { OnboardingFlow } from './components/OnboardingFlow';
 import { CAREER_ROLES, CURATED_RESOURCES, SKILLS_TAXONOMY } from './data/seedCatalog';
+import { fetchJsonWithRetry } from './lib/apiClient';
 import { downloadLearnerRecordJson } from './lib/exportData';
 import { applyPrerequisiteUnlocking } from './lib/roadmapEngine';
 import { computeRoleGapSummary } from './lib/scoring';
@@ -44,17 +46,7 @@ import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   isSameLocalDay,
 } from './store/notifications';
-import { AgentActivityPage } from './pages/AgentActivityPage';
-import { AssessmentsPage } from './pages/AssessmentsPage';
-import { CareerExplorerPage } from './pages/CareerExplorerPage';
-import { MentorPage } from './pages/MentorPage';
-import { AppRoute, OverviewPage } from './pages/OverviewPage';
-import { ProfilePage } from './pages/ProfilePage';
-import { ProgressPage } from './pages/ProgressPage';
-import { ResourcesPage } from './pages/ResourcesPage';
-import { RoadmapPage } from './pages/RoadmapPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { SkillAnalysisPage } from './pages/SkillAnalysisPage';
+import type { AppRoute } from './pages/OverviewPage';
 import {
   AssessmentAttempt,
   CareerRole,
@@ -70,6 +62,18 @@ import {
   UserPreferences,
 } from './types/domain';
 
+const OverviewPage = lazy(() => import('./pages/OverviewPage').then((m) => ({ default: m.OverviewPage })));
+const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })));
+const SkillAnalysisPage = lazy(() => import('./pages/SkillAnalysisPage').then((m) => ({ default: m.SkillAnalysisPage })));
+const CareerExplorerPage = lazy(() => import('./pages/CareerExplorerPage').then((m) => ({ default: m.CareerExplorerPage })));
+const RoadmapPage = lazy(() => import('./pages/RoadmapPage').then((m) => ({ default: m.RoadmapPage })));
+const ResourcesPage = lazy(() => import('./pages/ResourcesPage').then((m) => ({ default: m.ResourcesPage })));
+const AssessmentsPage = lazy(() => import('./pages/AssessmentsPage').then((m) => ({ default: m.AssessmentsPage })));
+const MentorPage = lazy(() => import('./pages/MentorPage').then((m) => ({ default: m.MentorPage })));
+const ProgressPage = lazy(() => import('./pages/ProgressPage').then((m) => ({ default: m.ProgressPage })));
+const AgentActivityPage = lazy(() => import('./pages/AgentActivityPage').then((m) => ({ default: m.AgentActivityPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+
 const VALID_ROUTES: AppRoute[] = [
   'overview',
   'profile',
@@ -84,10 +88,25 @@ const VALID_ROUTES: AppRoute[] = [
   'settings',
 ];
 
+const NAV_ITEMS: Array<{ id: AppRoute; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'profile', label: 'My Profile', icon: User },
+  { id: 'skills', label: 'Skill Analysis', icon: BarChart3 },
+  { id: 'careers', label: 'Career Explorer', icon: Compass },
+  { id: 'roadmap', label: 'My Roadmap', icon: MapIcon },
+  { id: 'resources', label: 'Resource Library', icon: BookOpen },
+  { id: 'assessments', label: 'Assessments', icon: ClipboardCheck },
+  { id: 'mentor', label: 'AI Mentor', icon: Bot },
+  { id: 'progress', label: 'Progress Analytics', icon: Activity },
+  { id: 'agents', label: 'Agent Activity', icon: Sparkles },
+];
+
 function parseHashRoute(): AppRoute {
   if (typeof window === 'undefined') return 'overview';
-  const raw = window.location.hash.replace(/^#\/?/, '').trim() as AppRoute;
-  return VALID_ROUTES.includes(raw) ? raw : 'overview';
+  const hashRoute = window.location.hash.replace(/^#\/?/, '').trim() as AppRoute;
+  if (VALID_ROUTES.includes(hashRoute)) return hashRoute;
+  const pathRoute = window.location.pathname.replace(/^\/+|\/+$/g, '').trim() as AppRoute;
+  return VALID_ROUTES.includes(pathRoute) ? pathRoute : 'overview';
 }
 
 export default function App() {
@@ -101,6 +120,7 @@ export default function App() {
   const [mentorDrawerOpen, setMentorDrawerOpen] = useState(false);
   const [activeLessonResource, setActiveLessonResource] = useState<LearningResource | null>(null);
   const [preselectedAssessmentId, setPreselectedAssessmentId] = useState<string | null>(null);
+  const [highlightedAttemptId, setHighlightedAttemptId] = useState<string | null>(null);
   const [preselectedModuleId, setPreselectedModuleId] = useState<string | undefined>(undefined);
 
   const [geminiConfigured, setGeminiConfigured] = useState<boolean>(false);
@@ -197,8 +217,7 @@ export default function App() {
 
   // Check server health & Gemini availability
   useEffect(() => {
-    fetch('/api/health')
-      .then((r) => (r.ok ? r.json() : null))
+    fetchJsonWithRetry<{ geminiConfigured?: boolean }>('/api/health', { timeoutMs: 8000, retries: 1 })
       .then((d) => {
         if (d && typeof d.geminiConfigured === 'boolean') {
           setGeminiConfigured(d.geminiConfigured);
@@ -336,7 +355,7 @@ export default function App() {
     setIsBusy(true);
     try {
       const eventId = `evt-onboard-${Date.now()}`;
-      const res = await fetch('/api/orchestrate/onboarding', {
+      const data = await fetchJsonWithRetry<any>('/api/orchestrate/onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -348,11 +367,6 @@ export default function App() {
           existingRoadmap: null,
         }),
       });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error || 'Failed to generate personalized learning plan.');
-      }
-      const data = await res.json();
       const targetRole =
         state.roleTemplates.find((r) => r.id === newProfile.targetRoleId) ?? CAREER_ROLES[0];
       const gapSum = computeRoleGapSummary(targetRole, newEvidence, SKILLS_TAXONOMY);
@@ -427,7 +441,7 @@ export default function App() {
     setIsBusy(true);
     try {
       const eventId = `evt-refresh-${Date.now()}`;
-      const res = await fetch('/api/orchestrate/onboarding', {
+      const data = await fetchJsonWithRetry<any>('/api/orchestrate/onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -439,8 +453,6 @@ export default function App() {
           existingRoadmap: state.roadmap,
         }),
       });
-      if (!res.ok) throw new Error('Failed to refresh skill analysis and roadmap.');
-      const data = await res.json();
       const targetRole =
         state.roleTemplates.find((r) => r.id === targetProfile.targetRoleId) ?? CAREER_ROLES[0];
       const gapSum = computeRoleGapSummary(targetRole, targetEvidence, SKILLS_TAXONOMY);
@@ -623,7 +635,7 @@ export default function App() {
     setIsBusy(true);
     try {
       const submissionEventId = `evt-sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const res = await fetch('/api/assessments/submit', {
+      const data = await fetchJsonWithRetry<any>('/api/assessments/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -639,11 +651,6 @@ export default function App() {
           remediationThreshold: state.preferences.remediationThreshold,
         }),
       });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error || 'Assessment grading failed.');
-      }
-      const data = await res.json();
       const attempt: AssessmentAttempt = data.attempt;
       const today = new Date().toISOString().slice(0, 10);
 
@@ -769,7 +776,7 @@ export default function App() {
     setIsBusy(true);
     try {
       const eventId = `evt-career-${Date.now()}`;
-      const res = await fetch('/api/orchestrate/career-change', {
+      const data = await fetchJsonWithRetry<any>('/api/orchestrate/career-change', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -781,8 +788,6 @@ export default function App() {
           roleTemplates: state.roleTemplates,
         }),
       });
-      if (!res.ok) throw new Error('Career change orchestration failed.');
-      const data = await res.json();
 
       const targetRole =
         state.roleTemplates.find((r) => r.id === targetRoleId) ?? CAREER_ROLES[0];
@@ -869,7 +874,7 @@ export default function App() {
     }));
 
     try {
-      const res = await fetch('/api/mentor/chat', {
+      const data = await fetchJsonWithRetry<any>('/api/mentor/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -882,8 +887,6 @@ export default function App() {
           recentRuns: state.agentRuns.slice(0, 5),
         }),
       });
-      if (!res.ok) throw new Error('AI Mentor could not respond right now.');
-      const data = await res.json();
       const mentorNotifs: NotificationItem[] = [
         createNotification({
           type: 'agent',
@@ -1029,6 +1032,67 @@ export default function App() {
     navigate('overview');
     addToast('Demo data reset to Alex Morgan baseline.', 'success');
   };
+
+  // NOTE: All hooks MUST be called unconditionally above any early return!
+  const trimmedSearch = globalSearch.trim().toLowerCase();
+  const quickSearchResults = useMemo(() => {
+    if (!trimmedSearch) return [];
+    const results: Array<{
+      id: string;
+      label: string;
+      category: string;
+      onSelect: () => void;
+    }> = [];
+
+    for (const item of [...NAV_ITEMS, { id: 'settings' as AppRoute, label: 'Settings', icon: Settings }]) {
+      if (item.label.toLowerCase().includes(trimmedSearch)) {
+        results.push({
+          id: `page-${item.id}`,
+          label: item.label,
+          category: 'Page',
+          onSelect: () => {
+            navigate(item.id);
+            setGlobalSearch('');
+            setSearchFocused(false);
+          },
+        });
+      }
+    }
+
+    for (const r of state.roleTemplates) {
+      if (r.title.toLowerCase().includes(trimmedSearch) || (r.category ?? '').toLowerCase().includes(trimmedSearch)) {
+        results.push({
+          id: `role-${r.id}`,
+          label: r.title,
+          category: `Career · ${r.category ?? 'Technology'}`,
+          onSelect: () => {
+            navigate('careers');
+            setGlobalSearch('');
+            setSearchFocused(false);
+          },
+        });
+      }
+      if (results.length >= 8) break;
+    }
+
+    for (const res of CURATED_RESOURCES) {
+      if (res.title.toLowerCase().includes(trimmedSearch) || res.skillId.toLowerCase().includes(trimmedSearch)) {
+        results.push({
+          id: `res-${res.id}`,
+          label: res.title,
+          category: 'Resource',
+          onSelect: () => {
+            setActiveLessonResource(res);
+            setGlobalSearch('');
+            setSearchFocused(false);
+          },
+        });
+      }
+      if (results.length >= 10) break;
+    }
+
+    return results.slice(0, 8);
+  }, [trimmedSearch, state.roleTemplates, navigate]);
 
   // Entry Gateway when no profile exists yet
   if (!state.profile && !onboardingMode) {
@@ -1248,19 +1312,7 @@ export default function App() {
   const gapSummary = computeRoleGapSummary(activeRole, state.skillEvidence, SKILLS_TAXONOMY);
   const latestMentorMessage = [...state.mentorMessages].reverse().find((m) => m.role === 'assistant');
 
-  const navItems: Array<{ id: AppRoute; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-    { id: 'profile', label: 'My Profile', icon: User },
-    { id: 'skills', label: 'Skill Analysis', icon: BarChart3 },
-    { id: 'careers', label: 'Career Explorer', icon: Compass },
-    { id: 'roadmap', label: 'My Roadmap', icon: MapIcon },
-    { id: 'resources', label: 'Resource Library', icon: BookOpen },
-    { id: 'assessments', label: 'Assessments', icon: ClipboardCheck },
-    { id: 'mentor', label: 'AI Mentor', icon: Bot },
-    { id: 'progress', label: 'Progress Analytics', icon: Activity },
-    { id: 'agents', label: 'Agent Activity', icon: Sparkles },
-  ];
-
+  const navItems = NAV_ITEMS;
   const mobilePrimaryNav = navItems.slice(0, 4);
   const currentPageLabel = navItems.find((n) => n.id === route)?.label ?? 'Settings';
   const profileInitials = state.profile.name
@@ -1269,66 +1321,6 @@ export default function App() {
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase())
     .join('') || 'SN';
-
-  const trimmedSearch = globalSearch.trim().toLowerCase();
-  const quickSearchResults = useMemo(() => {
-    if (!trimmedSearch) return [];
-    const results: Array<{
-      id: string;
-      label: string;
-      category: string;
-      onSelect: () => void;
-    }> = [];
-
-    for (const item of [...navItems, { id: 'settings' as AppRoute, label: 'Settings', icon: Settings }]) {
-      if (item.label.toLowerCase().includes(trimmedSearch)) {
-        results.push({
-          id: `page-${item.id}`,
-          label: item.label,
-          category: 'Page',
-          onSelect: () => {
-            navigate(item.id);
-            setGlobalSearch('');
-            setSearchFocused(false);
-          },
-        });
-      }
-    }
-
-    for (const r of state.roleTemplates) {
-      if (r.title.toLowerCase().includes(trimmedSearch) || (r.category ?? '').toLowerCase().includes(trimmedSearch)) {
-        results.push({
-          id: `role-${r.id}`,
-          label: r.title,
-          category: `Career · ${r.category ?? 'Technology'}`,
-          onSelect: () => {
-            navigate('careers');
-            setGlobalSearch('');
-            setSearchFocused(false);
-          },
-        });
-      }
-      if (results.length >= 8) break;
-    }
-
-    for (const res of CURATED_RESOURCES) {
-      if (res.title.toLowerCase().includes(trimmedSearch) || res.skillId.toLowerCase().includes(trimmedSearch)) {
-        results.push({
-          id: `res-${res.id}`,
-          label: res.title,
-          category: 'Resource',
-          onSelect: () => {
-            setActiveLessonResource(res);
-            setGlobalSearch('');
-            setSearchFocused(false);
-          },
-        });
-      }
-      if (results.length >= 10) break;
-    }
-
-    return results.slice(0, 8);
-  }, [trimmedSearch, state.roleTemplates, navigate]);
 
   return (
     <ErrorBoundary>
@@ -1674,6 +1666,18 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setAvatarMenuOpen(false);
+                        setState((prev) => ({ ...createEmptyState(prev.preferences.theme) }));
+                        setOnboardingMode(true);
+                      }}
+                      className="w-full px-4 py-2 text-left text-xs font-medium text-[#0F172A] dark:text-slate-200 hover:bg-[#F1F5F9] dark:hover:bg-slate-800 flex items-center gap-2"
+                    >
+                      <UserPlus className="h-3.5 w-3.5 text-[#475569]" />
+                      New Learner Profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAvatarMenuOpen(false);
                         handleResetDemoData();
                       }}
                       className="w-full px-4 py-2 text-left text-xs font-medium text-[#059669] dark:text-emerald-400 hover:bg-[#ECFDF5] dark:hover:bg-emerald-950/40 flex items-center gap-2"
@@ -1690,6 +1694,13 @@ export default function App() {
           {/* Main Viewport */}
           <main className="flex-1 p-6 lg:p-8 pb-24 md:pb-8 max-w-[1280px] w-full mx-auto">
             <div key={route} className="animate-fade-in">
+            <Suspense
+              fallback={
+                <div className="sn-card p-8 text-sm text-[#475569] dark:text-slate-400">
+                  Loading workspace view...
+                </div>
+              }
+            >
             {route === 'overview' && (
               <OverviewPage
                 profile={state.profile}
@@ -1711,7 +1722,7 @@ export default function App() {
                 }}
                 onSimulateLowScoreDemo={async () => {
                   navigate('assessments');
-                  await handleSubmitAssessment({
+                  const simulated = await handleSubmitAssessment({
                     assessmentId: 'assess-js-foundations',
                     answers: {
                       'q-js-1': 2,
@@ -1721,6 +1732,9 @@ export default function App() {
                     },
                     isSimulatedDemo: true,
                   });
+                  if (simulated) {
+                    setHighlightedAttemptId(simulated.id);
+                  }
                 }}
                 onDismissDemoGuide={() =>
                   handleUpdatePreferences({ ...state.preferences, showDemoGuide: false })
@@ -1767,6 +1781,7 @@ export default function App() {
             {route === 'roadmap' && (
               <RoadmapPage
                 roadmap={state.roadmap}
+                unlockThreshold={state.preferences.unlockThreshold}
                 onStartModule={handleStartModule}
                 onOpenResource={(res) => setActiveLessonResource(res)}
                 onToggleExerciseStep={handleToggleExerciseStep}
@@ -1791,10 +1806,13 @@ export default function App() {
             {route === 'assessments' && (
               <AssessmentsPage
                 preselectedAssessmentId={preselectedAssessmentId}
+                highlightedAttemptId={highlightedAttemptId}
                 attempts={state.assessmentAttempts}
                 unlockThreshold={state.preferences.unlockThreshold}
                 remediationThreshold={state.preferences.remediationThreshold}
                 isSubmitting={isBusy}
+                onClearPreselection={() => setPreselectedAssessmentId(null)}
+                onClearHighlightedAttempt={() => setHighlightedAttemptId(null)}
                 onSubmitAssessment={handleSubmitAssessment}
               />
             )}
@@ -1854,6 +1872,7 @@ export default function App() {
                 }}
               />
             )}
+            </Suspense>
             </div>
           </main>
         </div>
@@ -1895,8 +1914,12 @@ export default function App() {
           open={mentorDrawerOpen}
           messages={state.mentorMessages}
           isSending={mentorSending}
+          error={mentorError}
           onClose={() => setMentorDrawerOpen(false)}
           onSendMessage={handleSendMentorMessage}
+          onRetryLast={async () => {
+            if (lastMentorQuestion) await handleSendMentorMessage(lastMentorQuestion);
+          }}
           onConfirmProposedChange={handleConfirmProposedChange}
         />
 

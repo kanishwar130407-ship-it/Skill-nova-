@@ -1,10 +1,10 @@
-import {
+import type {
   CareerCategory,
   CareerRole,
   DemandLevel,
   RoleDifficulty,
   RoleSkillRequirement,
-} from '../types/domain';
+} from '../types/domain.ts';
 
 interface RoleMetaInput {
   id: string;

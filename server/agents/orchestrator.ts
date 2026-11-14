@@ -4,14 +4,14 @@ import {
   CAREER_ROLES,
   CURATED_RESOURCES,
   SKILLS_TAXONOMY,
-} from '../../src/data/seedCatalog';
+} from '../../src/data/seedCatalog.ts';
 import {
   adaptRoadmapForAssessment,
   applyCareerChange,
   generateRoadmapForRole,
-} from '../../src/lib/roadmapEngine';
-import { computeRoleGapSummary, numericToProficiency } from '../../src/lib/scoring';
-import {
+} from '../../src/lib/roadmapEngine.ts';
+import { computeRoleGapSummary, numericToProficiency } from '../../src/lib/scoring.ts';
+import type {
   AgentName,
   AgentRun,
   AssessmentAttempt,
@@ -23,12 +23,23 @@ import {
   QuestionResult,
   RoleGapSummary,
   SkillEvidence,
-} from '../../src/types/domain';
-import { getAssessmentDefinition, SERVER_ANSWER_KEYS } from '../assessmentBank';
-import { callGeminiStructured, callGeminiText, isGeminiConfigured, wrapUntrustedData } from '../geminiClient';
+} from '../../src/types/domain.ts';
+import { getAssessmentDefinition, SERVER_ANSWER_KEYS } from '../assessmentBank.ts';
+import { callGeminiStructured, callGeminiText, isGeminiConfigured, wrapUntrustedData } from '../geminiClient.ts';
 
-// Idempotency cache so retried requests with the same eventId return the cached result without mutating twice
+// Bounded idempotency cache so retried requests with the same eventId return the cached result without unbounded growth
+const MAX_CACHE_ENTRIES = 200;
 const processedWorkflowCache = new Map<string, unknown>();
+
+function setBoundedCache<K, V>(map: Map<K, V>, key: K, value: V): void {
+  if (map.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey !== undefined) {
+      map.delete(oldestKey);
+    }
+  }
+  map.set(key, value);
+}
 
 function makeRunId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -742,22 +753,22 @@ export async function orchestrateOnboardingOrProfileRefresh(params: {
   const role =
     params.roleTemplates.find((r) => r.id === params.profile.targetRoleId) ?? CAREER_ROLES[0];
 
-  // Step 1: Profile Analyst
-  const paResult = await runProfileAnalystAgent({
-    workflowId,
-    trigger: params.trigger,
-    profile: params.profile,
-    evidence: params.evidence,
-  });
-
-  // Step 2: Deterministic Gap Score + Career Gap Analyst
+  // Steps 1 & 2: Run Profile Analyst + Career Gap Analyst in parallel (independent inputs)
   const gapSummary = computeRoleGapSummary(role, params.evidence, SKILLS_TAXONOMY);
-  const cgaResult = await runCareerGapAnalystAgent({
-    workflowId,
-    trigger: params.trigger,
-    role,
-    gapSummary,
-  });
+  const [paResult, cgaResult] = await Promise.all([
+    runProfileAnalystAgent({
+      workflowId,
+      trigger: params.trigger,
+      profile: params.profile,
+      evidence: params.evidence,
+    }),
+    runCareerGapAnalystAgent({
+      workflowId,
+      trigger: params.trigger,
+      role,
+      gapSummary,
+    }),
+  ]);
 
   // Step 3: Prerequisite-aware roadmap build + Learning Path Planner
   const preservedCompleted = (params.existingRoadmap?.modules ?? []).filter(
@@ -785,27 +796,27 @@ export async function orchestrateOnboardingOrProfileRefresh(params: {
     gapSummary,
   });
 
-  // Step 4: Resource Curator
-  const rcResult = await runResourceCuratorAgent({
-    workflowId,
-    trigger: params.trigger,
-    profile: params.profile,
-    roadmap: lppResult.roadmap,
-  });
-
-  const nextMod = rcResult.roadmap.modules.find(
+  const nextMod = lppResult.roadmap.modules.find(
     (m) => m.status === 'available' || m.status === 'in_progress' || m.status === 'needs_review',
   );
 
-  // Step 5: Mentor summary
-  const mentorResult = await runAIMentorSummaryAgent({
-    workflowId,
-    trigger: params.trigger,
-    learnerName: params.profile.name,
-    roleTitle: role.title,
-    eventSummary: cgaResult.executiveSummary,
-    nextModuleTitle: nextMod?.title,
-  });
+  // Steps 4 & 5: Run Resource Curator + AI Mentor summary in parallel
+  const [rcResult, mentorResult] = await Promise.all([
+    runResourceCuratorAgent({
+      workflowId,
+      trigger: params.trigger,
+      profile: params.profile,
+      roadmap: lppResult.roadmap,
+    }),
+    runAIMentorSummaryAgent({
+      workflowId,
+      trigger: params.trigger,
+      learnerName: params.profile.name,
+      roleTitle: role.title,
+      eventSummary: cgaResult.executiveSummary,
+      nextModuleTitle: nextMod?.title,
+    }),
+  ]);
 
   const agentRuns = [paResult.run, cgaResult.run, lppResult.run, rcResult.run, mentorResult.run];
   const usedLive = agentRuns.some((r) => r.mode === 'live-gemini');
@@ -819,7 +830,7 @@ export async function orchestrateOnboardingOrProfileRefresh(params: {
     mode: usedLive ? ('live-gemini' as const) : ('offline-simulated' as const),
   };
 
-  processedWorkflowCache.set(params.eventId, result);
+  setBoundedCache(processedWorkflowCache, params.eventId, result);
   return result;
 }
 
@@ -1069,29 +1080,53 @@ export async function orchestrateAssessmentSubmission(params: {
     });
     agentRuns.push(lppResult.run);
 
-    // Agent 3: Resource Curator updates recommendations for remediation/unlocked modules
-    const rcResult = await runResourceCuratorAgent({
-      workflowId,
-      trigger: 'assessment-submission',
-      profile: params.profile,
-      roadmap: lppResult.roadmap,
-    });
-    agentRuns.push(rcResult.run);
+    const nextMod = lppResult.roadmap.modules.find(
+      (m) => m.status === 'needs_review' || m.status === 'available' || m.status === 'in_progress',
+    );
+
+    // Run Resource Curator + AI Mentor summary in parallel
+    const [rcResult, mentorResult] = await Promise.all([
+      runResourceCuratorAgent({
+        workflowId,
+        trigger: 'assessment-submission',
+        profile: params.profile,
+        roadmap: lppResult.roadmap,
+      }),
+      runAIMentorSummaryAgent({
+        workflowId,
+        trigger: 'assessment-submission',
+        learnerName: params.profile.name,
+        roleTitle: role.title,
+        eventSummary: `${params.isSimulatedDemo ? '[Simulated Low-Score Demo] ' : ''}${adaptationNote}`,
+        nextModuleTitle: nextMod?.title,
+      }),
+    ]);
+
+    agentRuns.push(rcResult.run, mentorResult.run);
     adaptedRoadmap = rcResult.roadmap;
+
+    const usedLive = agentRuns.some((r) => r.mode === 'live-gemini');
+    const result = {
+      attempt,
+      updatedEvidence,
+      updatedRoadmap: adaptedRoadmap,
+      gapSummary,
+      adaptationNote,
+      agentRuns,
+      mentorMessage: mentorResult.message,
+      mode: usedLive ? ('live-gemini' as const) : ('offline-simulated' as const),
+    };
+
+    setBoundedCache(processedWorkflowCache, params.submissionEventId, result);
+    return result;
   }
 
-  const nextMod = adaptedRoadmap?.modules.find(
-    (m) => m.status === 'needs_review' || m.status === 'available' || m.status === 'in_progress',
-  );
-
-  // Agent 4: AI Mentor summary
   const mentorResult = await runAIMentorSummaryAgent({
     workflowId,
     trigger: 'assessment-submission',
     learnerName: params.profile.name,
     roleTitle: role.title,
     eventSummary: `${params.isSimulatedDemo ? '[Simulated Low-Score Demo] ' : ''}${adaptationNote}`,
-    nextModuleTitle: nextMod?.title,
   });
   agentRuns.push(mentorResult.run);
 
@@ -1107,7 +1142,7 @@ export async function orchestrateAssessmentSubmission(params: {
     mode: usedLive ? ('live-gemini' as const) : ('offline-simulated' as const),
   };
 
-  processedWorkflowCache.set(params.submissionEventId, result);
+  setBoundedCache(processedWorkflowCache, params.submissionEventId, result);
   return result;
 }
 
@@ -1130,7 +1165,7 @@ export async function orchestrateCareerChange(params: {
     params.roleTemplates.find((r) => r.id === params.targetRoleId) ?? CAREER_ROLES[0];
 
   // Note: Career-change workflow intentionally skips Profile Analyst (unaffected agent!)
-  // Pipeline: Career Gap Analyst -> Learning Path Planner -> Resource Curator -> Mentor summary
+  // Pipeline: Career Gap Analyst + deterministic applyCareerChange -> Learning Path Planner -> [Resource Curator, Mentor summary]
   const updatedProfile: LearnerProfile = {
     ...params.profile,
     targetRoleId: targetRole.id,
@@ -1138,13 +1173,6 @@ export async function orchestrateCareerChange(params: {
   };
 
   const gapSummary = computeRoleGapSummary(targetRole, params.evidence, SKILLS_TAXONOMY);
-  const cgaResult = await runCareerGapAnalystAgent({
-    workflowId,
-    trigger: 'career-change',
-    role: targetRole,
-    gapSummary,
-  });
-
   const { newRoadmap, changeSummary } = applyCareerChange({
     learnerId: params.profile.id,
     currentRoadmap: params.currentRoadmap,
@@ -1154,34 +1182,43 @@ export async function orchestrateCareerChange(params: {
     evidence: params.evidence,
   });
 
-  const lppResult = await runLearningPathPlannerAgent({
-    workflowId,
-    trigger: 'career-change',
-    role: targetRole,
-    weeklyHours: params.profile.weeklyHours,
-    roadmap: newRoadmap,
-    gapSummary,
-  });
+  const [cgaResult, lppResult] = await Promise.all([
+    runCareerGapAnalystAgent({
+      workflowId,
+      trigger: 'career-change',
+      role: targetRole,
+      gapSummary,
+    }),
+    runLearningPathPlannerAgent({
+      workflowId,
+      trigger: 'career-change',
+      role: targetRole,
+      weeklyHours: params.profile.weeklyHours,
+      roadmap: newRoadmap,
+      gapSummary,
+    }),
+  ]);
 
-  const rcResult = await runResourceCuratorAgent({
-    workflowId,
-    trigger: 'career-change',
-    profile: updatedProfile,
-    roadmap: lppResult.roadmap,
-  });
-
-  const nextMod = rcResult.roadmap.modules.find(
+  const nextMod = lppResult.roadmap.modules.find(
     (m) => m.status === 'available' || m.status === 'in_progress',
   );
 
-  const mentorResult = await runAIMentorSummaryAgent({
-    workflowId,
-    trigger: 'career-change',
-    learnerName: params.profile.name,
-    roleTitle: targetRole.title,
-    eventSummary: changeSummary,
-    nextModuleTitle: nextMod?.title,
-  });
+  const [rcResult, mentorResult] = await Promise.all([
+    runResourceCuratorAgent({
+      workflowId,
+      trigger: 'career-change',
+      profile: updatedProfile,
+      roadmap: lppResult.roadmap,
+    }),
+    runAIMentorSummaryAgent({
+      workflowId,
+      trigger: 'career-change',
+      learnerName: params.profile.name,
+      roleTitle: targetRole.title,
+      eventSummary: changeSummary,
+      nextModuleTitle: nextMod?.title,
+    }),
+  ]);
 
   const agentRuns = [cgaResult.run, lppResult.run, rcResult.run, mentorResult.run];
   const usedLive = agentRuns.some((r) => r.mode === 'live-gemini');
@@ -1196,7 +1233,7 @@ export async function orchestrateCareerChange(params: {
     mode: usedLive ? ('live-gemini' as const) : ('offline-simulated' as const),
   };
 
-  processedWorkflowCache.set(params.eventId, result);
+  setBoundedCache(processedWorkflowCache, params.eventId, result);
   return result;
 }
 
@@ -1324,22 +1361,32 @@ export async function runMentorChat(params: {
   let content = '';
   let proposedChange: ProposedRoadmapChange | undefined;
 
-  if (qLower.includes('data analyst') || qLower.includes('switch') || qLower.includes('pivot')) {
-    const daRole = params.roleTemplates.find((r) => r.id === 'data-analyst');
-    content =
-      `If you switch your goal from **${role.title}** to **Data Analyst**:\n\n` +
-      `- **Retained skills & progress**: Your existing **Python** and **SQL** evidence, plus any completed SQL modules and all past assessment attempts, stay preserved.\n` +
-      `- **New focus areas**: We will add **Pandas & Data Wrangling**, **Applied Statistics**, and **Data Visualization** while setting aside frontend React modules.\n\n` +
-      `Nothing has been changed automatically—confirm below if you would like to preview and apply this career change.`;
-    if (daRole && role.id !== daRole.id) {
+  const mentionedRole = params.roleTemplates.find(
+    (r) => r.id !== role.id && qLower.includes(r.title.toLowerCase()),
+  );
+
+  if (mentionedRole || qLower.includes('switch') || qLower.includes('pivot')) {
+    const targetPivot =
+      mentionedRole ??
+      params.roleTemplates.find((r) => r.id === 'data-analyst' && r.id !== role.id) ??
+      params.roleTemplates.find((r) => r.id !== role.id);
+    if (targetPivot) {
+      const targetReqs = targetPivot.requirements.slice(0, 3).map((r) => r.skillName).join(', ');
+      content =
+        `If you switch your goal from **${role.title}** to **${targetPivot.title}**:\n\n` +
+        `- **Retained skills & progress**: All verified skill evidence, overlapping completed modules, and your complete assessment history remain preserved.\n` +
+        `- **New focus areas**: Your updated roadmap will prioritize **${targetReqs || `${targetPivot.title} core competencies`}** at **${params.profile.weeklyHours} hrs/week**.\n\n` +
+        `Nothing has been changed automatically—confirm below if you would like to preview and apply this career change.`;
       proposedChange = {
         id: makeRunId('prop'),
         type: 'career-change',
-        targetRoleId: daRole.id,
-        targetRoleTitle: daRole.title,
-        summary: 'Preview career change to Data Analyst while keeping SQL/Python progress and assessment history.',
+        targetRoleId: targetPivot.id,
+        targetRoleTitle: targetPivot.title,
+        summary: `Preview career change to ${targetPivot.title} while keeping overlapping progress and assessment history.`,
         confirmed: false,
       };
+    } else {
+      content = `You are already tracking **${role.title}**. Use the Career Explorer to compare or add secondary roles.`;
     }
   } else if (qLower.includes('mistake') || qLower.includes('assessment') || qLower.includes('score')) {
     if (lastAttempt) {
@@ -1483,7 +1530,7 @@ export async function generateCareerRequirements(params: {
         zodSchema: GeneratedRoleRequirementsSchema,
       });
 
-      careerRequirementsCache.set(cacheKey, data);
+      setBoundedCache(careerRequirementsCache, cacheKey, data);
       return { data, mode: 'live-gemini' };
     } catch {
       // Fallback cleanly to deterministic generator
@@ -1511,7 +1558,7 @@ export async function generateCareerRequirements(params: {
     ],
   };
 
-  careerRequirementsCache.set(cacheKey, fallback);
+  setBoundedCache(careerRequirementsCache, cacheKey, fallback);
   return { data: fallback, mode: 'offline-simulated' };
 }
 
